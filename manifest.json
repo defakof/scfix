@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "SoundCloud Full Shuffle",
+  "version": "1.0.0",
+  "description": "Makes SoundCloud's shuffle button shuffle your entire likes or playlist, not just the first few tracks.",
+  "homepage_url": "https://github.com/defakof/scfix",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://soundcloud.com/*"],
+      "js": ["page.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://soundcloud.com/*"],
+      "css": ["toast.css"],
+      "run_at": "document_start"
+    }
+  ]
+}
