@@ -1,55 +1,41 @@
-# scfix: SoundCloud Full Shuffle
+# scfix
 
-A Chrome extension that makes SoundCloud's own **shuffle** button shuffle your *entire* likes or playlist, not just the first 20–100 tracks.
+A calmer SoundCloud for Chrome: an editorial redesign of the web player with a live scope visualizer, light and dark themes, and a shuffle that actually covers your whole library.
 
-## The problem
+## What you get
 
-On soundcloud.com, shuffle only mixes the tracks that have already been loaded into the play queue. Likes and playlists load in small batches, so with 1,400 liked tracks you hear a shuffled handful of recent likes, then the next handful, and so on. Older likes almost never come up. There's no desktop app to fall back on, so the web player is all there is.
+- **A new interface over soundcloud.com.** Serif typography, warm paper tones (or a warm dark theme), your likes grouped by the month you liked them, filter and sort.
+- **Now Playing.** A big, quiet view of the current track with a live visualizer and an Up Next queue you can jump around in, trim, or reshuffle.
+- **A visualizer that follows the music.** By default it draws the song’s real waveform, held steady like an oscilloscope; a calmer band-based style is one click away. It ignores the volume slider and uses SoundCloud’s loudness map of the whole song, so quiet intros stay small and drops hit big. Smoothness, zoom, height and lookahead are adjustable in Settings → Visualizer (or the Visualizer button on Now Playing).
+- **Shuffle that works.** SoundCloud's own shuffle only mixes the first few dozen loaded tracks. scfix loads the whole list (likes or playlists) and shuffles everything, including tracks before the one you started from. ~1,400 likes shuffle in under a second once preloaded.
+- **Keyboard shortcuts.** Space, ← → to seek, Shift ← → for previous/next, S shuffle, L like, N Now Playing, Esc back, C classic SoundCloud.
+- **Classic mode.** Feed, search, playlists and profiles still open in SoundCloud's own interface for now; a button in the corner brings you back.
 
-## What scfix does
-
-Press the normal shuffle button and scfix:
-
-1. loads every track of the list into SoundCloud's queue, using SoundCloud's own player
-2. lets SoundCloud shuffle the whole thing, including tracks that come *before* the one you started from
-
-A small toast confirms it: **Shuffling all 1,451 tracks**.
-
-| ~1,400 liked tracks | Time until shuffle covers everything |
-|---|---|
-| Stock SoundCloud (scroll the queue until it's all loaded) | ~15 s+ of scrolling |
-| scfix, pressing shuffle right after opening the page | ~3.5 s |
-| scfix, after the background preload (~4 s on the page) | **~0.6 s** |
+Playback stays SoundCloud's own player, so your login, play counts, Go+ and everything else keep working.
 
 ## Install
 
-1. Download `scfix-v1.0.0.zip` from the [latest release](https://github.com/defakof/scfix/releases/latest) and unzip it, or clone this repo
+1. Download `scfix-v2.0.0.zip` from the [latest release](https://github.com/defakof/scfix/releases/latest) and unzip it, or clone this repo
 2. Open `chrome://extensions`
 3. Turn on **Developer mode** (top right)
-4. Click **Load unpacked** and select the unzipped folder (the one containing `manifest.json`)
+4. Click **Load unpacked** and select the folder that has `manifest.json` directly inside
 5. Reload any open SoundCloud tabs
-
-## Use
-
-Play something from your likes (or anyone's likes) or a playlist, then press shuffle in the player bar. If shuffle is already on when you start a list, scfix handles it automatically. Turning shuffle off restores the original order.
-
-The feed, stations and autoplay are left alone: they're endless, so they keep SoundCloud's normal behaviour.
 
 ## How it works
 
-- **Finds SoundCloud's player.** scfix looks up SoundCloud's internal `PlayManager` by the methods it has (`pullNext`, `toggleShuffle`, …), not by internal module numbers, so it survives most SoundCloud updates.
-- **Fills the queue, then shuffles.** When shuffle turns on, it calls `pullNext` until the list is exhausted, moves any tracks before the current one to the end, then lets SoundCloud's own shuffle mix everything after the current track.
-- **Loads quickly.** Likes are requested 200 per page instead of 24. When you open a likes page, the remaining pages and any liked playlists are preloaded in the background and handed to SoundCloud when it asks for them. The preload downloads about 4.5 MB of track data for ~1,400 likes (less on the wire, since it's compressed) and is kept in memory for 10 minutes.
-- **Avoids SoundCloud's slow path.** While filling the queue it keeps shuffle off and skips a per-track analytics event, which otherwise makes loading about 15× slower and freezes the page.
+- `page.js` runs in SoundCloud's own page. It finds SoundCloud's internal player by the methods it has (never by module number, so it survives most updates), taps its Web Audio graph for the visualizer, loads likes 200 per request with a background preload shared with SoundCloud's own requests, and implements full shuffle.
+- `app.js` draws the interface in an isolated shadow root, so SoundCloud's styles can't leak in. It talks to `page.js` through window messages: state comes in four times a second, commands go out.
+- To play a list, scfix steers the SoundCloud page underneath (it opens the list and starts the track) and then controls SoundCloud's player directly.
 
 ## Privacy
 
-- No extension permissions
+- One permission: `storage`, for your settings
 - No data collection, no analytics, no external servers
-- The only network requests go to SoundCloud's own API (`api-v2.soundcloud.com`), the same requests SoundCloud makes itself
+- Network requests go only to SoundCloud's API and to Google Fonts for the typefaces
 
 ## Limitations
 
-- Chrome only for now (any Chromium browser that supports Manifest V3 should work)
-- Tracks SoundCloud won't play in your region, or Go+ previews, stay out of the queue, as they do on SoundCloud itself
-- scfix relies on SoundCloud's internal player code. If a SoundCloud update changes it, scfix turns itself off and shuffle goes back to SoundCloud's default. Please [open an issue](https://github.com/defakof/scfix/issues) if that happens.
+- Chrome only for now (any Chromium browser with Manifest V3 should work)
+- Feed, search, playlists, profiles and history open in classic SoundCloud until their scfix screens are built
+- Tracks SoundCloud won't play in your region, and Go+ previews, are shown dimmed and left out of shuffles
+- scfix relies on SoundCloud's internal player code. If an update breaks it, please [open an issue](https://github.com/defakof/scfix/issues).
