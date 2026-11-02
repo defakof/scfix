@@ -71,7 +71,7 @@
   // ---------------------------------------------------------------------------
   // Settings (chrome.storage) and state
   // ---------------------------------------------------------------------------
-  const DEFAULTS = { theme: 'system', accent: 'rust', echo: true, mini: true, fullShuffle: true, includeEarlier: true, preload: true, lookahead: 120, style: 'wave', smooth: 0.7, zoom: 60, height: 1, on: true };
+  const DEFAULTS = { theme: 'system', accent: 'rust', echo: true, mini: true, fullShuffle: true, includeEarlier: true, preload: true, lookahead: 120, style: 'wave', smooth: 0.8, zoom: 60, height: 1, on: true };
   const S = { set: Object.assign({}, DEFAULTS), st: { ready: false }, view: 'likes', me: undefined, owner: null, likes: null, likesErr: null, filter: '', sort: 'recent' };
   const save = () => chrome.storage.local.set({ scfix: S.set });
   const pageConfig = () => cmd('config', { fullShuffle: S.set.fullShuffle, includeEarlier: S.set.includeEarlier, preload: S.set.preload, lookahead: S.set.lookahead, style: S.set.style, smooth: S.set.smooth, zoom: S.set.zoom, height: S.set.height });

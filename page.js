@@ -13,7 +13,7 @@
 
   const TAG = '[scfix]';
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const cfg = { fullShuffle: true, includeEarlier: true, preload: true, lookahead: 120, style: 'wave', smooth: 0.7, zoom: 60, height: 1 };
+  const cfg = { fullShuffle: true, includeEarlier: true, preload: true, lookahead: 120, style: 'wave', smooth: 0.8, zoom: 60, height: 1 };
 
   // ---------------------------------------------------------------------------
   // 1. API: bigger pages, background preload, cache shared with SoundCloud's XHRs
@@ -656,12 +656,19 @@
     const R = Math.max(1, Math.round(sr * (0.0004 + 0.0018 * cfg.smooth))); // box low-pass half-width
 
     // Running sums over the region we look at, so any box average costs O(1).
-    const lo = Math.max(0, nominal - cycle - R - 1), hi = Math.min(N - 1, nominal + cycle + span + R + 1);
+    const lo = Math.max(0, nominal - cycle - 2 * R - 1), hi = Math.min(N - 1, nominal + cycle + span + 2 * R + 1);
     const ps = new Float64Array(hi - lo + 2);
     for (let i = lo; i <= hi; i++) ps[i - lo + 1] = ps[i - lo] + td[i];
     const box = i => {
       const a = Math.max(lo, i - R), b = Math.min(hi, i + R);
       return (ps[b - lo + 1] - ps[a - lo]) / (b - a + 1);
+    };
+    // Drawing uses a box of boxes (triangular): it removes far more fizz than one box does.
+    const step = Math.max(1, Math.round(R / 8));
+    const tri = i => {
+      let s = 0, n = 0;
+      for (let m = -R; m <= R; m += step) { s += box(i + m); n++; }
+      return s / n;
     };
 
     // Lock, like a scope app's correlation trigger: among the rising zero crossings (of a
@@ -697,7 +704,7 @@
     const pts = new Float32Array(P);
     let pk = 0;
     for (let j = 0; j < P; j++) {
-      const v = box(start + Math.round(j / (P - 1) * span)) * comp;
+      const v = tri(start + Math.round(j / (P - 1) * span)) * comp;
       pts[j] = v;
       pk = Math.max(pk, Math.abs(v));
     }
