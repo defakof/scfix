@@ -400,7 +400,8 @@
   const loaded = new Map();
   function asyncPage(key, load, render) {
     const box = h('div', { class: 'page' }, backLink(), h('p', { class: 'empty' }, 'Loading…'));
-    const fill = data => { if (!box.isConnected && S.key !== key) return; box.replaceChildren(...keep(backLink(), render(data))); highlight(); };
+    const shown = S.key; // the screen this page belongs to; skip filling if you've moved on
+    const fill = data => { if (S.key !== shown) return; box.replaceChildren(...keep(backLink(), render(data))); highlight(); };
     if (loaded.has(key)) fill(loaded.get(key));
     else load().then(d => { loaded.set(key, d); fill(d); })
       .catch(err => box.replaceChildren(...keep(backLink(), h('p', { class: 'empty' }, 'Couldn’t load this: ' + err.message))));
