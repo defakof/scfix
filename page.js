@@ -37,7 +37,9 @@
     return u.pathname + u.search;
   };
   const isFirstPage = url => (new URL(url).searchParams.get('offset') || '0') === '0';
-  const headers = () => (authHeader ? { Authorization: authHeader } : {});
+  // From SoundCloud's own requests; its sign-in cookie covers the moments before one is seen.
+  const auth = () => { const c = document.cookie.match(/(?:^|; )oauth_token=([^;]+)/); return authHeader || (c ? 'OAuth ' + c[1] : null); };
+  const headers = () => (auth() ? { Authorization: auth() } : {});
   const withCarry = href => {
     const url = new URL(href, API);
     for (const p of CARRY_PARAMS) if (carry[p] && !url.searchParams.has(p)) url.searchParams.set(p, carry[p]);
@@ -607,8 +609,8 @@
   const RPC = {
     viz() { return { style: cfg.style, bands: Array.from(disp, v => +v.toFixed(2)), kick: +kick.toFixed(2), song: +songScale.toFixed(2), level: +waveLevel.toFixed(4), unvolume: +unvolume().toFixed(2), elVolume: mediaEl ? mediaEl.volume : null, wave: !!wave.env, lookahead: cfg.lookahead }; },
     async me() {
-      if (!authHeader) await waitFor(() => authHeader, 4000);
-      if (!authHeader) return null;
+      if (!auth()) await waitFor(() => auth(), 4000);
+      if (!auth()) return null;
       try {
         const me = await api('/me');
         return { id: me.id, username: me.username, permalink: me.permalink, avatar: me.avatar_url, likes: me.likes_count };
@@ -679,7 +681,7 @@
     },
     // Your feed (signed in only): uploads and reposts from people you follow.
     async feed(next) {
-      if (!authHeader) return null;
+      if (!auth()) return null;
       const j = await api(next || '/stream?limit=50&linked_partitioning=1');
       const items = [];
       for (const it of j.collection || []) {
@@ -692,14 +694,14 @@
     },
     // What you played, newest first (signed in only).
     async history(next) {
-      if (!authHeader) return null;
+      if (!auth()) return null;
       const j = await api(next || '/me/play-history/tracks?limit=200&linked_partitioning=1');
       const items = (j.collection || []).filter(it => it.track).map(it => Object.assign(trackInfo(it.track), { playedAt: it.played_at }));
       return { items, next: j.next_href || null };
     },
     // The home page's shelves: Made for you, Mixed for you, More of what you like…
     async selections() {
-      if (!authHeader) return null;
+      if (!auth()) return null;
       const j = await api('/mixed-selections?limit=20&linked_partitioning=1');
       const item = it => (it.kind === 'system-playlist' ? systemInfo(it)
         : it.kind === 'playlist' ? Object.assign({ kind: 'playlist' }, playlistInfo(it))
