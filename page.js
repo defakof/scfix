@@ -357,7 +357,8 @@
       const cur = pm.getCurrentSound(), src = (pm.getCurrentQueueItem() || {}).sourceInfo;
       const fromList = src && src.type !== 'history';
       if (!(cur && cur.id === id && fromList)) {
-        const rowsOf = () => [...document.querySelectorAll('.soundList__item, .trackList__item, .searchList__item')].filter(r => r.querySelector('.sc-button-play'));
+        // /you/likes shows tiles (badgeList); every other page shows rows.
+        const rowsOf = () => [...document.querySelectorAll('.soundList__item, .trackList__item, .searchList__item, .badgeList__item')].filter(r => r.querySelector('.sc-button-play'));
         // A list from the previous page can linger for a moment after navigating.
         const stale = here() === route ? null : rowsOf()[0];
         navigate(route);
