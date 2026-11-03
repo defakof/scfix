@@ -221,6 +221,7 @@
   // Likes: {type: 'user-likes', resourceType: 'user'}. Playlists: {type: 'single', resourceType: 'playlist'}.
   function isFiniteSource() {
     const { type = '', resourceType = '' } = pm.getCurrentQueueItem()?.sourceInfo || {};
+    if (resourceType === 'scfix') return true; // a list scfix queued itself (section 5)
     if (ENDLESS_SOURCE.test(type)) return false;
     return resourceType === 'playlist' || FINITE_SOURCE.test(type);
   }
@@ -414,6 +415,81 @@
     }
   }
 
+  // Lists no SoundCloud page shows as pressable rows (History, Daily Drops and other
+  // system playlists, a selection of tracks): scfix builds the queue from track data.
+  const rawTracks = new Map(); // id → SoundCloud's track JSON, kept from scfix's own API calls
+  let Sound = null, QueueItem = null;
+  function queueClasses() {
+    if (Sound && QueueItem) return true;
+    for (const id in (webpackRequire && webpackRequire.c) || {}) {
+      try {
+        const C = webpackRequire.c[id].exports;
+        if (typeof C !== 'function' || !C.prototype) continue;
+        if (C.prototype.urnPrefix === 'soundcloud:tracks' && typeof C.prototype.play === 'function') Sound = C;
+        else if (typeof C.prototype.makeExplicit === 'function' && typeof C.prototype.associateCastId === 'function') QueueItem = C;
+      } catch (e) { /* see findModule */ }
+    }
+    return !!(Sound && QueueItem);
+  }
+
+  // A quick playlist (kind 'selection') replaces the queue; this is what it replaced.
+  let replaced = null; // { items, item, shuffle }
+  const isQuick = () => ((pm.getCurrentQueueItem() || {}).sourceInfo || {}).type === 'scfix-selection';
+
+  async function playIds({ ids, start, shuffle, kind, label }) {
+    if (!pm) return;
+    if (!queueClasses()) { say('Couldn’t start that list. SoundCloud may have changed.', 3000); return; }
+    const run = ++playRun;
+    const live = () => run === playRun;
+    directing = true;
+    try {
+      const missing = ids.filter(id => !rawTracks.has(id));
+      for (let i = 0; i < missing.length; i += 50) {
+        for (const t of await api('/tracks?ids=' + missing.slice(i, i + 50).join(','))) rawTracks.set(t.id, t);
+      }
+      if (!live()) return;
+      const list = ids.map(id => rawTracks.get(id)).filter(t => t && t.policy !== 'BLOCK');
+      if (!list.length) { say('SoundCloud can’t play these tracks.', 3000); return; }
+
+      const sourceInfo = { type: 'scfix-' + kind, resourceType: 'scfix', label: label || '' };
+      const contextSnapshot = { sourceInfo: {}, layoutInfo: null, restoreUrl: null };
+      // index is the list's own order, which "shuffle off" goes back to.
+      const items = list.map((t, index) => {
+        const item = new QueueItem({}, { sound: new Sound(t), sourceInfo, contextSnapshot, index });
+        item.release(); // as SoundCloud's own createExplicitQueueItem does
+        return item;
+      });
+      if (kind !== 'selection') replaced = null;
+      else if (!isQuick()) replaced = { items: pm.getQueue().models.slice(), item: pm.getCurrentQueueItem(), shuffle: !!pm.getState('shuffle') };
+
+      const at = Math.max(0, list.findIndex(t => t.id === start));
+      setShuffle(false);
+      // A shuffle covers the whole list, so it starts the queue at the chosen track.
+      if (shuffle) pm.replaceQueue(items.slice(at).concat(items.slice(0, at)), 0);
+      else pm.replaceQueue(items, at);
+      pm.playCurrent();
+      if (shuffle) { setShuffle(true); directing = false; await fullShuffle(); }
+    } finally {
+      if (live()) {
+        directing = false;
+        notice = notice && notice.until !== Infinity ? notice : null;
+        pushState(true);
+      }
+    }
+  }
+
+  // Ends a quick playlist: back to the queue it replaced, at the track you were on.
+  function endQuick() {
+    if (!pm || !replaced || !isQuick()) return;
+    const { items, item, shuffle } = replaced;
+    replaced = null;
+    const playing = pm.isPlaying();
+    if (!items.length) { pm.pauseCurrent(); return; }
+    pm.replaceQueue(items, Math.max(0, items.indexOf(item)), { pause: !playing });
+    if (!!pm.getState('shuffle') !== shuffle) setShuffle(shuffle);
+    if (playing) pm.playCurrent();
+  }
+
   // ---------------------------------------------------------------------------
   // 6. Bridge to the UI
   // ---------------------------------------------------------------------------
@@ -422,6 +498,7 @@
   const art = (url, size) => (url ? url.replace(/-(large|t\d+x\d+|crop|original)\./, `-${size}.`) : null);
   function trackInfo(a) {
     if (!a) return null;
+    if (a.media && !a.attributes) rawTracks.set(a.id, a); // full API data: playable as is
     const u = a.user || {};
     return {
       id: a.id,
@@ -455,6 +532,18 @@
       count: p.track_count || 0, duration: p.duration || 0, created: p.created_at, album: !!p.is_album || p.set_type === 'album',
     };
   }
+  // Daily Drops, Weekly Wave, Your Mix, Related tracks…: made by SoundCloud, opened by urn.
+  function systemInfo(p) {
+    if (!p) return null;
+    const tracks = p.tracks || [];
+    return {
+      kind: 'system', urn: p.urn, title: p.short_title || p.title || '', fullTitle: p.title || '',
+      artist: 'SoundCloud', description: p.short_description || p.description || '',
+      url: p.permalink_url ? new URL(p.permalink_url).pathname : null,
+      art: art(p.calculated_artwork_url || p.artwork_url, 't500x500'),
+      count: tracks.length, duration: tracks.reduce((s, t) => s + (t.full_duration || t.duration || 0), 0), updated: p.last_updated,
+    };
+  }
   const attrs = sound => sound && (sound.attributes || null);
 
   let lastSent = '';
@@ -478,6 +567,7 @@
       volume: volume ? volume.getVolume() : null,
       muted: volume ? volume.getMuted() : false,
       queue: { next, total: queue.length, index: cur, source: (pm.getCurrentQueueItem() || {}).sourceInfo || null },
+      quick: replaced && isQuick() ? { total: queue.length, index: cur } : null,
       notice: notice ? notice.text : null,
       busy,
     };
@@ -505,6 +595,8 @@
     remove: qi => { const item = pm.getQueue().at(qi); if (item) pm.removeItem(item); },
     reshuffle: () => { if (pm.getState('shuffle')) { setShuffle(false); fullShuffle(); } else pm.toggleShuffle(); },
     playTrack: opts => playTrack(opts),
+    playIds: opts => playIds(opts),
+    endQuick: () => endQuick(),
     navigate: path => navigate(path),
     config: c => {
       Object.assign(cfg, c);
@@ -597,6 +689,35 @@
         else if (it.playlist) items.push({ kind: 'playlist', repost, by, at: it.created_at, playlist: playlistInfo(it.playlist) });
       }
       return { items, next: j.next_href || null };
+    },
+    // What you played, newest first (signed in only).
+    async history(next) {
+      if (!authHeader) return null;
+      const j = await api(next || '/me/play-history/tracks?limit=200&linked_partitioning=1');
+      const items = (j.collection || []).filter(it => it.track).map(it => Object.assign(trackInfo(it.track), { playedAt: it.played_at }));
+      return { items, next: j.next_href || null };
+    },
+    // The home page's shelves: Made for you, Mixed for you, More of what you like…
+    async selections() {
+      if (!authHeader) return null;
+      const j = await api('/mixed-selections?limit=20&linked_partitioning=1');
+      const item = it => (it.kind === 'system-playlist' ? systemInfo(it)
+        : it.kind === 'playlist' ? Object.assign({ kind: 'playlist' }, playlistInfo(it))
+          : it.kind === 'user' ? Object.assign({ kind: 'user' }, userInfo(it)) : null);
+      return (j.collection || []).map(s => ({ id: s.id, title: s.title || '', feature: s.tracking_feature_name || '', items: ((s.items || {}).collection || []).map(item).filter(Boolean) }))
+        .filter(s => s.items.length);
+    },
+    // A system playlist with its tracks: SoundCloud sends only their ids.
+    async systemPlaylist(urn) {
+      const p = await api('/system-playlists/' + encodeURIComponent(urn));
+      const ids = (p.tracks || []).map(t => t.id);
+      const full = new Map((p.tracks || []).filter(t => t.title).map(t => [t.id, t]));
+      const missing = ids.filter(id => !full.has(id));
+      for (let i = 0; i < missing.length; i += 50) {
+        for (const t of await api('/tracks?ids=' + missing.slice(i, i + 50).join(','))) full.set(t.id, t);
+      }
+      p.tracks = ids.map(id => full.get(id)).filter(Boolean);
+      return Object.assign(systemInfo(p), { tracks: p.tracks.map(trackInfo) });
     },
   };
 

@@ -26,6 +26,7 @@
     expand: svg(18, 18, 'M10.5 3h4.5v4.5M15 3l-5 5M7.5 15H3v-4.5M3 15l5-5'),
     back: svg(16, 16, 'M10 3L5 8l5 5'),
     x: svg(12, 12, 'M2.5 2.5l7 7M9.5 2.5l-7 7'),
+    check: svg(12, 12, 'M2.5 6.5l2.4 2.4L9.5 3.4'),
     search: svg(16, 18, 'M8 3a5 5 0 1 0 0 10A5 5 0 0 0 8 3zM11.6 11.6L15 15'),
     ext: svg(10, 12, 'M3.5 8.5l5-5M4.5 3.5h4v4'),
     feed: svg(18, 18, 'M3 4.5h12M3 9h12M3 13.5h7'),
@@ -123,7 +124,7 @@
     root.append(style, app, pill);
     document.documentElement.append(host);
 
-    app.append(h('div', { class: 'shell' }, sidebar(), mainEl = h('main', { class: 'main' })), bar(), now());
+    app.append(h('div', { class: 'shell' }, sidebar(), h('div', { class: 'col' }, mainEl = h('main', { class: 'main' }), selBar())), bar(), now());
     applyTheme();
     setOn(S.set.on);
     show('likes');
@@ -150,10 +151,10 @@
     }
   }
 
-  // Views: likes, playlists, playlist {id}, artist {permalink}, search {q, tab}, feed, following,
+  // Views: likes, playlists, playlist {id} or {urn}, artist {permalink}, search {q, tab}, feed, following, history,
   // settings, and now (Now Playing, drawn over the rest). go() remembers where you were; back() returns.
   const PAGES = { likes: () => likesPage(), settings: () => settingsPage(), playlists: () => playlistsPage(), playlist: () => playlistPage(),
-    artist: () => artistPage(), search: () => searchPage(), feed: () => feedPage(), following: () => followingPage() };
+    artist: () => artistPage(), search: () => searchPage(), feed: () => feedPage(), following: () => followingPage(), history: () => historyPage() };
   const NAV_OF = { playlist: 'playlists', artist: 'following' };
   const stack = [];
   function go(view, params) {
@@ -208,7 +209,7 @@
         item('Likes', 'likes', { nav: 'likes', count: true }),
         item('Playlists', 'playlists', { nav: 'playlists' }),
         item('Following', 'following', { nav: 'following' }),
-        item('History', 'history', { path: '/you/history' })),
+        item('History', 'history', { nav: 'history' })),
       B.pls = h('div', { class: 'nav', hidden: true }),
       h('div', { class: 'side-foot' }, B.avatar, B.who, B.themeBtn,
         h('button', { class: 'round', type: 'button', 'data-nav': 'settings', onclick: () => go('settings'), 'aria-label': 'Settings' }, icon('gear'))));
@@ -303,7 +304,7 @@
     ownerEl.textContent = q ? `of ${nf(S.likes.length)} tracks` : 'tracks';
 
     const frag = document.createDocumentFragment();
-    frag.append(tableHead([GENRE, LIKED]));
+    frag.append(tableHead([GENRE, LIKED], items));
     let lastMonth = null;
     items.forEach((t, i) => {
       if (S.sort === 'recent' && !q) {
@@ -334,10 +335,17 @@
   const permalinkOf = url => (url || '').replace(/^\//, '');
   const keep = (...xs) => xs.flat().filter(x => x != null && x !== false);
 
-  // Playing a list: steer SoundCloud to the page that lists it, then start the track.
+  // A player starts a list at track t, shuffled or not. Most lists: steer SoundCloud to the
+  // page that lists them and start the track there. Lists no page shows as rows (History,
+  // SoundCloud's own playlists, picked tracks): page.js queues them itself.
   function playFrom(route, t, shuffle) { if (t && route) cmd('playTrack', { route, id: t.id, permalink: t.url, shuffle }); }
-  function shuffleFrom(route, items) { const p = items.filter(t => !unplayable(t)); playFrom(route, p[Math.floor(Math.random() * p.length)], true); }
-  function inOrderFrom(route, items) { playFrom(route, items.filter(t => !unplayable(t))[0], false); }
+  const viaPage = route => (t, shuffle) => playFrom(route, t, shuffle);
+  const viaQueue = (items, kind, label) => (t, shuffle) => {
+    const ids = [...new Set(items.filter(x => !unplayable(x)).map(x => x.id))];
+    if (t && ids.length) cmd('playIds', { ids, start: t.id, shuffle: !!shuffle, kind, label });
+  };
+  function shuffleFrom(player, items) { const p = items.filter(t => !unplayable(t)); player(p[Math.floor(Math.random() * p.length)], true); }
+  function inOrderFrom(player, items) { player(items.filter(t => !unplayable(t))[0], false); }
 
   function backLink() {
     return stack.length ? h('button', { class: 'back', type: 'button', onclick: back, style: { alignSelf: 'flex-start', marginBottom: '-12px' } }, icon('back'), 'Back') : null;
@@ -348,17 +356,24 @@
       right ? h('div', { class: 'head-r' }, ...right) : null);
   }
   const section = (title, ...body) => h('section', { class: 'block' }, h('h2', { class: 'h2' }, title), ...body);
-  function listActions(route, items, ...extra) {
+  function listActions(player, items, ...extra) {
     const none = !items.some(t => !unplayable(t));
     return h('div', { class: 'actions' },
-      h('button', { class: 'btn solid', type: 'button', disabled: none, onclick: () => shuffleFrom(route, items) }, icon('shuffle'), 'Shuffle all'),
-      h('button', { class: 'btn', type: 'button', disabled: none, onclick: () => inOrderFrom(route, items) }, icon('play'), 'Play in order'),
+      h('button', { class: 'btn solid', type: 'button', disabled: none, onclick: () => shuffleFrom(player, items) }, icon('shuffle'), 'Shuffle all'),
+      h('button', { class: 'btn', type: 'button', disabled: none, onclick: () => inOrderFrom(player, items) }, icon('play'), 'Play in order'),
       ...extra);
   }
 
   // One row of any track table. `cols` are the two middle columns: [label, value(t)].
   function trackRow(t, n, onPlay, cols) {
-    const row = h('div', { class: 'row' + (unplayable(t) ? ' unavailable' : ''), role: 'row', ondblclick: () => onPlay(t) },
+    const off = unplayable(t);
+    // While tracks are picked, a click anywhere on a row picks it too.
+    const row = h('div', { class: 'row' + (off ? ' unavailable' : '') + (sel.has(t.id) ? ' sel' : ''), role: 'row',
+      onclick: e => { if (!off && !e.target.closest('button') && (sel.size || e.metaKey || e.ctrlKey || e.shiftKey)) pickRow(row, e); },
+      onmousedown: e => { if (e.shiftKey) e.preventDefault(); }, // no text selection on Shift-click
+      ondblclick: e => { if (!sel.size && !e.target.closest('button')) onPlay(t); } },
+      h('div', { class: 'pick', role: 'cell' }, off ? null : h('button', { type: 'button', role: 'checkbox', 'aria-checked': String(sel.has(t.id)), 'aria-label': 'Pick ' + t.title,
+        onclick: e => pickRow(row, e) }, icon('check'))),
       h('div', { class: 'num', role: 'cell' },
         h('span', {}, String(n)),
         h('button', { type: 'button', 'aria-label': 'Play ' + t.title, onclick: () => onPlay(t) }, icon('play')),
@@ -368,16 +383,20 @@
           h('button', { class: 't-sub link-sub', type: 'button', onclick: () => t.artistUrl && go('artist', { permalink: permalinkOf(t.artistUrl) }) }, t.artist + (unplayable(t) ? ' · not available' : '')))),
       ...cols.map(([, get]) => h('div', { class: 'cell', role: 'cell' }, get(t))),
       h('div', { class: 'cell r', role: 'cell' }, fmt(t.duration)));
+    row._track = t;
     rowById.set(t.id, row);
     return row;
   }
-  const tableHead = cols => h('div', { class: 'thead', role: 'row' },
+  // The header's checkbox picks every playable track in its table.
+  const tableHead = (cols, items) => h('div', { class: 'thead', role: 'row' },
+    h('span', { class: 'pick', role: 'columnheader' }, h('button', { type: 'button', role: 'checkbox', 'aria-label': 'Pick all tracks here',
+      'aria-checked': String(!!items && allPicked(items)), onclick: e => pickAll(e.currentTarget) }, icon('check'))),
     h('span', { role: 'columnheader' }, '#'), h('span', { role: 'columnheader' }, 'Title'),
     ...cols.map(([label]) => h('span', { role: 'columnheader' }, label)),
     h('span', { role: 'columnheader', style: { textAlign: 'right' } }, 'Time'));
   function trackTable(items, onPlay, cols, label) {
     if (!items.length) return h('p', { class: 'empty' }, 'No tracks here.');
-    return h('div', { role: 'table', 'aria-label': label || 'Tracks' }, tableHead(cols), ...items.map((t, i) => trackRow(t, i + 1, onPlay, cols)));
+    return h('div', { role: 'table', 'aria-label': label || 'Tracks' }, tableHead(cols, items), ...items.map((t, i) => trackRow(t, i + 1, onPlay, cols)));
   }
   const PLAYS = ['Plays', t => (t.plays ? nf(t.plays) : '—')];
   const GENRE = ['Genre', t => t.genre || '—'];
@@ -385,8 +404,9 @@
   function playlistCard(p) {
     const art = h('span', { class: 'card-art', 'aria-hidden': 'true' });
     if (p.art) art.style.backgroundImage = `url("${p.art}")`; else art.textContent = String(p.count);
-    return h('button', { class: 'card', type: 'button', onclick: () => go('playlist', { id: p.id }) },
-      art, h('span', { class: 'card-title' }, p.title), h('span', { class: 'card-sub' }, `${nf(p.count)} tracks · ${p.artist}`));
+    const system = p.kind === 'system';
+    return h('button', { class: 'card', type: 'button', title: p.fullTitle || p.title, onclick: () => go('playlist', system ? { urn: p.urn } : { id: p.id }) },
+      art, h('span', { class: 'card-title' }, p.title), h('span', { class: 'card-sub' }, system && p.description ? p.description : `${nf(p.count)} tracks · ${p.artist}`));
   }
   function artistCard(u) {
     const art = h('span', { class: 'card-art', 'aria-hidden': 'true' });
@@ -395,6 +415,7 @@
       art, h('span', { class: 'card-title' }, u.username), h('span', { class: 'card-sub' }, `${nf(u.followers)} followers`));
   }
   const cardGrid = cards => h('div', { class: 'grid' }, ...cards);
+  const shelf = cards => h('div', { class: 'shelf' }, ...cards);
 
   // A page whose content arrives later. Results are kept, so Back is instant.
   const loaded = new Map();
@@ -423,21 +444,24 @@
   }
 
   function playlistPage() {
-    const { id } = S.params;
-    return asyncPage('playlist:' + id, () => rpc('playlist', id), p => {
+    const { id, urn } = S.params; // urn: one of SoundCloud's own (Daily Drops, Your Mix…)
+    return asyncPage(urn ? 'system:' + urn : 'playlist:' + id, () => (urn ? rpc('systemPlaylist', urn) : rpc('playlist', id)), p => {
       const art = h('span', { class: 'pl-art', 'aria-hidden': 'true' });
       if (p.art) art.style.backgroundImage = `url("${p.art}")`;
-      const meta = `by ${p.artist} — ${nf(p.tracks.length)} tracks, ${longDur(p.duration)}` + (p.created ? `, made ${longDate(p.created)}` : '');
+      const size = `${nf(p.tracks.length)} tracks, ${longDur(p.duration)}`;
+      const meta = urn ? [p.description, size].filter(Boolean).join(' — ')
+        : `by ${p.artist} — ${size}` + (p.created ? `, made ${longDate(p.created)}` : '');
+      const player = urn ? viaQueue(p.tracks, 'system', p.title) : viaPage(p.url);
       return [
         h('header', { class: 'head pl-head' }, art,
           h('div', { class: 'head-l', style: { flex: '1 1 360px' } },
-            h('span', { class: 'kicker' }, p.album ? 'Album' : 'Playlist'),
+            h('span', { class: 'kicker' }, urn ? 'Made for you by SoundCloud' : p.album ? 'Album' : 'Playlist'),
             h('h1', { class: 'h1 fit' }, p.title),
             h('p', { class: 'serif-i', style: { margin: '0' } }, meta))),
-        listActions(p.url, p.tracks,
-          h('button', { class: 'btn', type: 'button', onclick: () => go('artist', { permalink: permalinkOf(p.artistUrl) }) }, p.artist),
-          h('button', { class: 'btn', type: 'button', onclick: () => classic(p.url) }, 'Open in SoundCloud')),
-        trackTable(p.tracks, t => playFrom(p.url, t), [GENRE, PLAYS], p.title),
+        listActions(player, p.tracks,
+          urn ? null : h('button', { class: 'btn', type: 'button', onclick: () => go('artist', { permalink: permalinkOf(p.artistUrl) }) }, p.artist),
+          p.url ? h('button', { class: 'btn', type: 'button', onclick: () => classic(p.url) }, 'Open in SoundCloud') : null),
+        trackTable(p.tracks, t => player(t), [GENRE, PLAYS], p.title),
       ];
     });
   }
@@ -449,7 +473,7 @@
       return [
         head('Artist', a.username, [h('span', { class: 'big-num' }, nf(a.followers)), h('span', { class: 'serif-i' }, `followers · ${nf(a.tracks)} tracks`)], 'fit'),
         a.description ? h('p', { class: 'desc' }, a.description) : null,
-        listActions(tracksRoute, a.latest.length ? a.latest : a.top,
+        listActions(viaPage(tracksRoute), a.latest.length ? a.latest : a.top,
           h('button', { class: 'btn', type: 'button', onclick: () => classic(a.url) }, 'Open in SoundCloud')),
         a.top.length ? section('Popular', trackTable(a.top, t => playFrom(`/${a.permalink}/popular-tracks`, t), [GENRE, PLAYS], 'Popular tracks')) : null,
         a.latest.length ? section('Latest', trackTable(a.latest, t => playFrom(tracksRoute, t), [GENRE, PLAYS], 'Latest tracks')) : null,
@@ -505,8 +529,20 @@
       h('label', { class: 'bigq-wrap' }, icon('search'), input), tabs, results);
   }
 
+  // SoundCloud's home shelves, made-for-you first. Recently Played is what History shows.
+  const SHELF_ORDER = ['made-for-you', 'your-moods', 'personalized-tracks', 'liked-by', 'personalized-albums', 'artist-stations'];
+  function forYou() {
+    const box = h('div', { class: 'stack' });
+    const rank = s => { const i = SHELF_ORDER.indexOf(s.feature); return i < 0 ? SHELF_ORDER.length : i; };
+    const fill = sels => box.replaceChildren(...sels.filter(s => s.feature !== 'recently-played').sort((a, b) => rank(a) - rank(b))
+      .map(s => section(s.title, shelf(s.items.map(it => (it.kind === 'user' ? artistCard(it) : playlistCard(it)))))));
+    if (loaded.has('selections')) fill(loaded.get('selections'));
+    else rpc('selections').then(sels => { if (sels) { loaded.set('selections', sels); fill(sels); } }).catch(() => { /* the shelves are optional */ });
+    return box;
+  }
+
   function feedPage() {
-    if (!S.me) return notice('Feed', S.me === null ? 'Sign in to SoundCloud to see uploads and reposts from people you follow.' : 'Loading…');
+    if (!S.me) return notice('Feed', S.me === null ? 'Sign in to SoundCloud to see what’s made for you and what the people you follow post.' : 'Loading…');
     let items = [], next = null, busy = false;
     const list = h('div', { class: 'stack' });
     const more = h('button', { class: 'btn', type: 'button', onclick: () => load(next) }, 'Load more');
@@ -535,8 +571,117 @@
     };
     load(null);
     return h('div', { class: 'page' }, backLink(),
-      head('From people you follow', 'Feed', [sw('feedReposts', 'Show reposts'), sw('feedLiked', 'Show tracks I’ve liked')]),
-      list);
+      head('For you and from people you follow', 'Feed'),
+      forYou(),
+      h('section', { class: 'block' },
+        h('div', { class: 'block-head' }, h('h2', { class: 'h2' }, 'From people you follow'),
+          h('div', { class: 'head-r sws' }, sw('feedReposts', 'Show reposts'), sw('feedLiked', 'Show tracks I’ve liked'))),
+        list));
+  }
+
+  // What you played, newest first, by day. A track played twice shows twice; playing the
+  // list plays each track once.
+  function historyPage() {
+    if (!S.me) return notice('History', S.me === null ? 'Sign in to SoundCloud to see what you’ve played.' : 'Loading…');
+    let items = [], next = null, busy = false, err = null;
+    const list = h('div', { role: 'table', 'aria-label': 'Played tracks' });
+    const actions = h('div', {});
+    const more = h('button', { class: 'btn', type: 'button', onclick: () => load(next) }, 'Load more');
+    const PLAYED = ['Played', t => new Date(t.playedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })];
+    const dayOf = ms => {
+      const d = new Date(ms), today = new Date(); today.setHours(0, 0, 0, 0);
+      const days = Math.round((today - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+      return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : d.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: d.getFullYear() === NOW_YEAR ? undefined : 'numeric' });
+    };
+    const draw = () => {
+      rowById = new Map();
+      if (err) return list.replaceChildren(h('p', { class: 'empty' }, 'Couldn’t load your history: ' + err));
+      if (!items.length) return list.replaceChildren(h('p', { class: 'empty' }, busy ? 'Loading…' : 'Nothing played yet.'));
+      const player = viaQueue(items, 'history', 'History');
+      actions.replaceChildren(listActions(player, items));
+      const frag = document.createDocumentFragment();
+      frag.append(tableHead([GENRE, PLAYED], items));
+      let last = null;
+      items.forEach((t, i) => {
+        const d = dayOf(t.playedAt);
+        if (d !== last) { last = d; frag.append(h('div', { class: 'month', role: 'row' }, h('span', { role: 'cell' }, d))); }
+        frag.append(trackRow(t, i + 1, x => player(x), [GENRE, PLAYED]));
+      });
+      if (next) frag.append(h('div', { style: { paddingTop: '24px' } }, more));
+      list.replaceChildren(frag);
+      highlight();
+    };
+    const load = async cursor => {
+      if (busy) return;
+      busy = true; more.disabled = true; draw();
+      try {
+        const r = await rpc('history', cursor || null);
+        if (r) { items = items.concat(r.items); next = r.next; }
+      } catch (e) { err = e.message; }
+      busy = false; more.disabled = false; draw();
+    };
+    load(null);
+    return h('div', { class: 'page' }, backLink(), head('Library', 'History'), actions, list);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Picking tracks: a quick playlist from any screens, played on its own
+  // ---------------------------------------------------------------------------
+  const sel = new Map(); // id → track, in the order picked
+  let anchor = null;     // the row picked last, where a Shift-click range starts
+  const allPicked = items => { const p = items.filter(t => !unplayable(t)); return p.length > 0 && p.every(t => sel.has(t.id)); };
+
+  function pickRow(row, e) {
+    const t = row._track;
+    const rows = e.shiftKey && anchor && anchor.isConnected && anchor.parentElement === row.parentElement ? [...row.parentElement.querySelectorAll('.row')] : null;
+    if (rows) {
+      const a = rows.indexOf(anchor), b = rows.indexOf(row);
+      for (const r of rows.slice(Math.min(a, b), Math.max(a, b) + 1)) if (!unplayable(r._track)) sel.set(r._track.id, r._track);
+    } else if (sel.has(t.id)) sel.delete(t.id);
+    else sel.set(t.id, t);
+    anchor = row;
+    drawSel();
+  }
+  function pickAll(box) {
+    const rows = [...box.closest('[role="table"]').querySelectorAll('.row')].filter(r => !unplayable(r._track));
+    const all = rows.length && rows.every(r => sel.has(r._track.id));
+    for (const r of rows) { if (all) sel.delete(r._track.id); else sel.set(r._track.id, r._track); }
+    drawSel();
+  }
+  function clearSel() { sel.clear(); anchor = null; drawSel(); }
+  function playSel(shuffle) {
+    const items = [...sel.values()].filter(t => !unplayable(t));
+    if (!items.length) return;
+    const start = shuffle ? items[Math.floor(Math.random() * items.length)] : items[0];
+    viaQueue(items, 'selection', 'Quick playlist')(start, shuffle);
+    clearSel();
+  }
+
+  function selBar() {
+    B.selCount = h('span', { class: 'sel-n' }, '');
+    B.selDur = h('span', { class: 'serif-i' }, '');
+    return B.sel = h('div', { class: 'selbar', role: 'region', 'aria-label': 'Picked tracks', hidden: true },
+      h('div', { class: 'sel-t' }, h('span', { class: 'kicker' }, 'Quick playlist'), h('span', {}, B.selCount, ' ', B.selDur)),
+      h('button', { class: 'btn solid', type: 'button', onclick: () => playSel(false) }, icon('play'), 'Play'),
+      h('button', { class: 'btn', type: 'button', onclick: () => playSel(true) }, icon('shuffle'), 'Shuffle'),
+      h('button', { class: 'ib', type: 'button', onclick: clearSel, 'aria-label': 'Clear picked tracks', title: 'Clear (Esc)' }, icon('x')));
+  }
+  function drawSel() {
+    app.classList.toggle('selecting', sel.size > 0);
+    for (const r of mainEl.querySelectorAll('.row')) {
+      const on = !!r._track && sel.has(r._track.id);
+      r.classList.toggle('sel', on);
+      const box = r.querySelector('.pick button');
+      if (box) box.setAttribute('aria-checked', String(on));
+    }
+    for (const box of mainEl.querySelectorAll('.thead .pick button')) {
+      const rows = [...box.closest('[role="table"]').querySelectorAll('.row')].filter(r => !unplayable(r._track));
+      box.setAttribute('aria-checked', String(rows.length > 0 && rows.every(r => sel.has(r._track.id))));
+    }
+    B.sel.hidden = !sel.size;
+    const items = [...sel.values()];
+    B.selCount.textContent = `${nf(items.length)} ${items.length === 1 ? 'track' : 'tracks'}`;
+    B.selDur.textContent = longDur(items.reduce((sum, t) => sum + (t.duration || 0), 0));
   }
 
   // ---------------------------------------------------------------------------
@@ -561,6 +706,9 @@
     B.now = h('span', {}, '0:00');
     B.total = h('span', {}, '0:00');
     B.notice = h('div', { class: 'notice', role: 'status' });
+    B.quickText = h('span', {}, '');
+    B.quick = h('div', { class: 'quick', hidden: true }, B.quickText,
+      h('button', { class: 'link', type: 'button', onclick: () => cmd('endQuick'), title: 'Back to what you were playing' }, 'End'));
     B.mini = h('button', { class: 'mini', type: 'button', onclick: () => show('now'), 'aria-label': 'Open Now Playing' }, h('canvas', { 'data-scope': '', 'data-weight': '1.3', 'data-scale': '0.9' }));
     B.mute = h('button', { class: 'ib dim', type: 'button', onclick: () => cmd('mute'), 'aria-label': 'Mute' }, icon('vol'));
     B.vol = h('input', { class: 'vol', type: 'range', min: '0', max: '100', 'aria-label': 'Volume', oninput: e => cmd('volume', +e.target.value / 100) });
@@ -573,7 +721,7 @@
           h('button', { class: 'ib', type: 'button', onclick: () => cmd('next'), 'aria-label': 'Next track' }, icon('next')),
           B.repeat),
         h('div', { class: 'prog' }, B.now, seekBar(B), B.total),
-        B.notice),
+        B.notice, B.quick),
       h('div', { class: 'bar-r' }, B.mini, B.mute, B.vol,
         h('button', { class: 'ib dim', type: 'button', onclick: () => show('now'), 'aria-label': 'Queue' }, icon('queue')),
         h('button', { class: 'ib dim', type: 'button', onclick: () => show('now'), 'aria-label': 'Expand player' }, icon('expand'))));
@@ -621,7 +769,10 @@
           N.notice)),
       h('aside', { class: 'up', 'aria-label': 'Up next' },
         h('div', { class: 'up-head' },
-          h('div', { class: 'row1' }, h('h2', { class: 'h2' }, 'Up next'), h('button', { class: 'link', type: 'button', onclick: () => cmd('reshuffle') }, 'Reshuffle')),
+          h('div', { class: 'row1' }, h('h2', { class: 'h2' }, 'Up next'),
+            h('span', { style: { display: 'flex', gap: '16px' } },
+              N.endQuick = h('button', { class: 'link', type: 'button', hidden: true, onclick: () => cmd('endQuick') }, 'End quick playlist'),
+              h('button', { class: 'link', type: 'button', onclick: () => cmd('reshuffle') }, 'Reshuffle'))),
           N.note),
         N.list));
   }
@@ -650,7 +801,7 @@
       h('span', { class: 'lbl' }, h('span', {}, label), h('span', {}, note)), h('span', { class: 'tog', 'aria-hidden': 'true' }));
     const swatch = (v, label, color) => h('button', { class: 'swatch', type: 'button', role: 'radio', 'aria-checked': String(S.set.accent === v), 'aria-label': label,
       onclick: () => { S.set.accent = v; save(); applyTheme(); show('settings'); } }, h('i', { style: { background: color } }));
-    const keys = [['Play or pause', 'Space'], ['Seek 5 s', '← →'], ['Previous / next track', 'Shift ← →'], ['Shuffle', 'S'], ['Like', 'L'], ['Now Playing', 'N'], ['Search', '/'], ['Back', 'Esc'], ['Classic SoundCloud', 'C']];
+    const keys = [['Play or pause', 'Space'], ['Seek 5 s', '← →'], ['Previous / next track', 'Shift ← →'], ['Shuffle', 'S'], ['Like', 'L'], ['Now Playing', 'N'], ['Search', '/'], ['Back, or clear picked tracks', 'Esc'], ['Pick tracks for a quick playlist', '⌘/Ctrl-click, Shift-click'], ['Classic SoundCloud', 'C']];
     return h('div', { class: 'page' },
       h('header', { class: 'head' }, h('div', { class: 'head-l' }, h('span', { class: 'kicker' }, 'scfix'), h('h1', { class: 'h1' }, 'Settings'))),
       h('section', { class: 'sec' }, h('h2', { class: 'h2' }, 'Appearance'),
@@ -681,7 +832,7 @@
         h('dl', { class: 'keys sec-body' }, ...keys.map(([w, k]) => h('div', {}, h('dt', {}, w), h('dd', {}, h('kbd', {}, k)))))),
       h('section', { class: 'sec' }, h('h2', { class: 'h2' }, 'Classic'),
         h('div', { class: 'sec-body' },
-          h('span', { style: { color: 'var(--mute)' } }, 'Anything scfix doesn’t cover yet (history, uploads, comments) opens in SoundCloud’s own interface. The scfix button in the corner brings you back.'),
+          h('span', { style: { color: 'var(--mute)' } }, 'Anything scfix doesn’t cover yet (uploads, comments, messages) opens in SoundCloud’s own interface. The scfix button in the corner brings you back.'),
           h('div', {}, h('button', { class: 'btn', type: 'button', onclick: () => classic() }, 'Use classic SoundCloud')))));
   }
   // A labelled range input bound to a setting; changes reach page.js live.
@@ -745,6 +896,9 @@
     }
     B.notice.textContent = st.notice || '';
     N.notice.textContent = st.notice || '';
+    B.quick.hidden = !st.quick || !!st.notice;
+    if (st.quick) B.quickText.textContent = `Quick playlist · ${st.quick.index + 1} of ${st.quick.total}`;
+    N.endQuick.hidden = !st.quick;
 
     N.title.textContent = t ? t.title : 'Nothing playing';
     N.artist.textContent = t ? t.artist : '';
@@ -752,7 +906,9 @@
     N.total.textContent = 'of ' + fmt(st.duration);
     N.meta.textContent = t ? [t.genre, t.plays ? nf(t.plays) + ' plays' : ''].filter(Boolean).join(' · ') : '';
     const src = st.queue && st.queue.source;
-    N.kicker.textContent = 'Now playing' + (src && /like/i.test(src.type || '') ? ' · from Likes' : src && src.resourceType === 'playlist' ? ' · from a playlist' : '');
+    const from = !src ? '' : src.type === 'scfix-selection' ? ' · Quick playlist' : src.type === 'scfix-history' ? ' · from History'
+      : src.type === 'scfix-system' ? ' · ' + src.label : /like/i.test(src.type || '') ? ' · from Likes' : src.resourceType === 'playlist' ? ' · from a playlist' : '';
+    N.kicker.textContent = 'Now playing' + from;
     N.note.textContent = st.queue ? (st.shuffle ? `Shuffling all ${nf(st.queue.total)} tracks` : `In order · ${nf(st.queue.total)} in the queue`) : '';
     if (st.queue) renderQueue(st);
     highlight();
@@ -774,7 +930,7 @@
       l: () => cmd('like'), L: () => cmd('like'),
       n: () => show(S.view === 'now' ? S.lastMain : 'now'), N: () => show(S.view === 'now' ? S.lastMain : 'now'),
       '/': () => go('search'),
-      Escape: () => back(),
+      Escape: () => (sel.size ? clearSel() : back()),
       c: () => classic(), C: () => classic(),
     }[k];
     if (!act) return;
