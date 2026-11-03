@@ -325,8 +325,9 @@
     return null;
   }
 
+  const here = () => location.pathname + location.search;
   function navigate(path) {
-    if (location.pathname === path) return;
+    if (here() === path) return;
     history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
   }
@@ -343,9 +344,9 @@
       const cur = pm.getCurrentSound(), src = (pm.getCurrentQueueItem() || {}).sourceInfo;
       const fromList = src && src.type !== 'history';
       if (!(cur && cur.id === id && fromList)) {
-        const rowsOf = () => [...document.querySelectorAll('.soundList__item, .trackList__item')].filter(r => r.querySelector('.sc-button-play'));
+        const rowsOf = () => [...document.querySelectorAll('.soundList__item, .trackList__item, .searchList__item')].filter(r => r.querySelector('.sc-button-play'));
         // A list from the previous page can linger for a moment after navigating.
-        const stale = location.pathname === route ? null : rowsOf()[0];
+        const stale = here() === route ? null : rowsOf()[0];
         navigate(route);
         const rows = await waitFor(() => { const r = rowsOf(); return r.length && r[0] !== stale ? r : null; });
         if (!live()) return;
@@ -403,6 +404,24 @@
       genre: a.genre || '',
       plays: a.playback_count || 0,
       policy: a.policy || '',
+    };
+  }
+  function userInfo(u) {
+    if (!u) return null;
+    return {
+      id: u.id, username: u.username || '', permalink: u.permalink, url: u.permalink ? '/' + u.permalink : null,
+      avatar: art(u.avatar_url, 't200x200'), followers: u.followers_count || 0, tracks: u.track_count || 0,
+      city: u.city || '', verified: !!u.verified,
+    };
+  }
+  function playlistInfo(p) {
+    if (!p) return null;
+    const u = p.user || {};
+    return {
+      id: p.id, title: p.title || '', artist: u.username || '', artistUrl: u.permalink ? '/' + u.permalink : null,
+      url: p.permalink_url ? new URL(p.permalink_url).pathname : null,
+      art: art(p.artwork_url || (p.tracks && p.tracks[0] && p.tracks[0].artwork_url) || u.avatar_url, 't500x500'),
+      count: p.track_count || 0, duration: p.duration || 0, created: p.created_at, album: !!p.is_album || p.set_type === 'album',
     };
   }
   const attrs = sound => sound && (sound.attributes || null);
@@ -482,16 +501,71 @@
       await waitFor(() => carry.client_id, 8000);
       const kind = self ? 'track_likes' : 'likes';
       const first = withCarry(`/users/${userId}/${kind}?offset=0&linked_partitioning=1&limit=${PAGE_SIZE}`);
-      const items = [];
+      const items = [], playlists = [];
       let pos = 0;
       const page0 = JSON.parse(await prefetch(first));
       await walk(first, page0, page => {
         for (const it of page.collection || []) {
           const p = pos++;
           if (it.track) items.push(Object.assign(trackInfo(it.track), { likedAt: it.created_at, pos: p }));
+          else if (it.playlist) playlists.push(Object.assign(playlistInfo(it.playlist), { likedAt: it.created_at }));
         }
       });
-      return items;
+      return { tracks: items, playlists };
+    },
+    async playlists(userId) {
+      const j = await api(`/users/${userId}/playlists?limit=50&linked_partitioning=1`);
+      return (j.collection || []).map(playlistInfo);
+    },
+    // A playlist with every track filled in: SoundCloud sends only the first few in full.
+    async playlist(id) {
+      const p = await api(`/playlists/${id}?representation=full`);
+      const full = new Map((p.tracks || []).filter(t => t.title).map(t => [t.id, t]));
+      const missing = (p.tracks || []).filter(t => !t.title).map(t => t.id);
+      for (let i = 0; i < missing.length; i += 50) {
+        for (const t of await api('/tracks?ids=' + missing.slice(i, i + 50).join(','))) full.set(t.id, t);
+      }
+      return Object.assign(playlistInfo(p), { tracks: (p.tracks || []).map(t => full.get(t.id)).filter(Boolean).map(trackInfo) });
+    },
+    async artist(permalink) {
+      const u = await api('/resolve?url=' + encodeURIComponent('https://soundcloud.com/' + permalink));
+      const [top, latest, sets] = await Promise.all([
+        api(`/users/${u.id}/toptracks?limit=10&linked_partitioning=1`).catch(() => ({ collection: [] })),
+        api(`/users/${u.id}/tracks?limit=50&linked_partitioning=1`).catch(() => ({ collection: [] })),
+        api(`/users/${u.id}/playlists?limit=24&linked_partitioning=1`).catch(() => ({ collection: [] })),
+      ]);
+      return Object.assign(userInfo(u), {
+        description: (u.description || '').slice(0, 400),
+        top: (top.collection || []).map(trackInfo),
+        latest: (latest.collection || []).map(trackInfo),
+        playlists: (sets.collection || []).map(playlistInfo),
+      });
+    },
+    async search(q) {
+      const enc = encodeURIComponent(q);
+      const [tracks, users, sets] = await Promise.all([
+        api(`/search/tracks?q=${enc}&limit=30&linked_partitioning=1`),
+        api(`/search/users?q=${enc}&limit=6&linked_partitioning=1`),
+        api(`/search/playlists?q=${enc}&limit=12&linked_partitioning=1`),
+      ]);
+      return { tracks: tracks.collection.map(trackInfo), users: users.collection.map(userInfo), playlists: sets.collection.map(playlistInfo) };
+    },
+    async following(userId) {
+      const j = await api(`/users/${userId}/followings?limit=200&linked_partitioning=1`);
+      return (j.collection || []).map(userInfo);
+    },
+    // Your feed (signed in only): uploads and reposts from people you follow.
+    async feed(next) {
+      if (!authHeader) return null;
+      const j = await api(next || '/stream?limit=50&linked_partitioning=1');
+      const items = [];
+      for (const it of j.collection || []) {
+        const repost = /repost/.test(it.type || '');
+        const by = userInfo(it.user);
+        if (it.track) items.push({ kind: 'track', repost, by, at: it.created_at, track: trackInfo(it.track) });
+        else if (it.playlist) items.push({ kind: 'playlist', repost, by, at: it.created_at, playlist: playlistInfo(it.playlist) });
+      }
+      return { items, next: j.next_href || null };
     },
   };
 
