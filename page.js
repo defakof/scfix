@@ -332,6 +332,19 @@
     window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
   }
 
+  // A bare el.click() is ignored until something has played once (SoundCloud
+  // starts its first play from the mousedown), so send the whole press.
+  function press(el) {
+    const r = el.getBoundingClientRect();
+    const o = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, buttons: 1, detail: 1,
+      clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+    el.dispatchEvent(new PointerEvent('pointerdown', o));
+    el.dispatchEvent(new MouseEvent('mousedown', o));
+    el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, o, { buttons: 0 })));
+    el.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, o, { buttons: 0 })));
+    el.dispatchEvent(new MouseEvent('click', Object.assign({}, o, { buttons: 0 })));
+  }
+
   // route: the SoundCloud page listing the tracks (e.g. /you/likes); id: the track to start.
   // A newer request supersedes one still in flight.
   let playRun = 0;
@@ -356,7 +369,7 @@
         const row = (permalink && rows.find(r => r.querySelector(`a[href="${permalink}"], a[href^="${permalink}?"]`))) || rows[0];
         const before = pm.getCurrentQueueItem();
         setShuffle(false);
-        row.querySelector('.sc-button-play').click();
+        press(row.querySelector('.sc-button-play'));
         const started = await waitFor(() => {
           const s = pm.getCurrentSound();
           return s && (pm.getCurrentQueueItem() !== before || s.id === id) ? s : null;
