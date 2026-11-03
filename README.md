@@ -8,8 +8,9 @@ A calmer SoundCloud for Chrome: an editorial redesign of the web player with a l
 - **Now Playing.** A big, quiet view of the current track with a live visualizer and an Up Next queue you can jump around in, trim, or reshuffle.
 - **A visualizer that follows the music.** By default it draws the song’s real waveform, held steady like an oscilloscope; a calmer band-based style is one click away. It ignores the volume slider and uses SoundCloud’s loudness map of the whole song, so quiet intros stay small and drops hit big. Smoothness, zoom, height and lookahead are adjustable in Settings → Visualizer (or the Visualizer button on Now Playing).
 - **Shuffle that works.** SoundCloud's own shuffle only mixes the first few dozen loaded tracks. scfix loads the whole list (likes or playlists) and shuffles everything, including tracks before the one you started from. ~1,400 likes shuffle in under a second once preloaded.
-- **Keyboard shortcuts.** Space, ← → to seek, Shift ← → for previous/next, S shuffle, L like, N Now Playing, Esc back, C classic SoundCloud.
-- **Classic mode.** Feed, search, playlists and profiles still open in SoundCloud's own interface for now; a button in the corner brings you back.
+- **Your whole library.** Feed, search, playlists, artist pages and the people you follow all have scfix screens, with Back and Esc to step back. Playlists and artist pages play in order or with full shuffle.
+- **Keyboard shortcuts.** Space, ← → to seek, Shift ← → for previous/next, S shuffle, L like, N Now Playing, / search, Esc back, C classic SoundCloud.
+- **Classic mode.** Press C (or open History) to use SoundCloud's own interface; a button in the corner brings you back.
 
 Playback stays SoundCloud's own player, so your login, play counts, Go+ and everything else keep working.
 
@@ -36,6 +37,7 @@ Playback stays SoundCloud's own player, so your login, play counts, Go+ and ever
 ## Limitations
 
 - Chrome only for now (any Chromium browser with Manifest V3 should work)
-- Feed, search, playlists, profiles and history open in classic SoundCloud until their scfix screens are built
+- History still opens in classic SoundCloud
+- The feed needs you to be signed in to SoundCloud
 - Tracks SoundCloud won't play in your region, and Go+ previews, are shown dimmed and left out of shuffles
 - scfix relies on SoundCloud's internal player code. If an update breaks it, please [open an issue](https://github.com/defakof/scfix/issues).
