@@ -352,7 +352,8 @@
         if (!live()) return;
         if (!rows) { say('Couldn’t open that list on SoundCloud.', 3000); return; }
 
-        const row = (permalink && rows.find(r => r.querySelector(`a[href="${permalink}"]`))) || rows[0];
+        // Playlist rows link to "/artist/track?in=artist/sets/list".
+        const row = (permalink && rows.find(r => r.querySelector(`a[href="${permalink}"], a[href^="${permalink}?"]`))) || rows[0];
         const before = pm.getCurrentQueueItem();
         setShuffle(false);
         row.querySelector('.sc-button-play').click();
