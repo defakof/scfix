@@ -16,7 +16,7 @@ Playback stays SoundCloud's own player, so your login, play counts, Go+ and ever
 
 ## Install
 
-1. Download `scfix-v2.0.0.zip` from the [latest release](https://github.com/defakof/scfix/releases/latest) and unzip it, or clone this repo
+1. Download `scfix-v2.1.0.zip` from the [latest release](https://github.com/defakof/scfix/releases/latest) and unzip it, or clone this repo
 2. Open `chrome://extensions`
 3. Turn on **Developer mode** (top right)
 4. Click **Load unpacked** and select the folder that has `manifest.json` directly inside
