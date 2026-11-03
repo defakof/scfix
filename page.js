@@ -354,9 +354,23 @@
     const live = () => run === playRun;
     directing = true;
     try {
-      const cur = pm.getCurrentSound(), src = (pm.getCurrentQueueItem() || {}).sourceInfo;
+      const cur = pm.getCurrentSound(), item = pm.getCurrentQueueItem(), src = (item || {}).sourceInfo;
       const fromList = src && src.type !== 'history';
-      if (!(cur && cur.id === id && fromList)) {
+      const find = () => pm.getQueue().models.find(m => m.sound && m.sound.id === id);
+      // Each queue item remembers the page its list was started from ("you/likes").
+      const sameList = fromList && '/' + ((item.contextSnapshot || {}).layoutInfo || {}).url === route;
+      if (cur && cur.id === id && fromList) {
+        // Already the current track.
+      } else if (sameList) {
+        // That list is already queued: jump straight to the track. SoundCloud leaves
+        // tracks it can't play (removed, region-blocked) out of the queue.
+        if (!find()) await pullAll(() => !live() || find());
+        if (!live()) return;
+        if (!find()) { say('SoundCloud can’t play that track.', 3000); return; }
+        setShuffle(false); // back to list order; a shuffled start reshuffles below
+        pm.setCurrentItem(find());
+      } else {
+        if (!live()) return;
         // /you/likes shows tiles (badgeList); every other page shows rows.
         const rowsOf = () => [...document.querySelectorAll('.soundList__item, .trackList__item, .searchList__item, .badgeList__item')].filter(r => r.querySelector('.sc-button-play'));
         // A list from the previous page can linger for a moment after navigating.
@@ -366,8 +380,12 @@
         if (!live()) return;
         if (!rows) { say('Couldn’t open that list on SoundCloud.', 3000); return; }
 
-        // Playlist rows link to "/artist/track?in=artist/sets/list".
-        const row = (permalink && rows.find(r => r.querySelector(`a[href="${permalink}"], a[href^="${permalink}?"]`))) || rows[0];
+        // Playlist rows link to "/artist/track?in=artist/sets/list". If the track isn't on
+        // screen, start the list from another row and jump to it in the queue afterwards;
+        // not from the loaded track's row, where a press would only play or pause it.
+        const linksTo = (r, p) => p && r.querySelector(`a[href="${p}"], a[href^="${p}?"]`);
+        const curPath = cur && cur.attributes && cur.attributes.permalink_url ? new URL(cur.attributes.permalink_url).pathname : null;
+        const row = rows.find(r => linksTo(r, permalink)) || rows.find(r => !linksTo(r, curPath)) || rows[0];
         const before = pm.getCurrentQueueItem();
         setShuffle(false);
         press(row.querySelector('.sc-button-play'));
@@ -379,12 +397,10 @@
         if (!started) { say('SoundCloud didn’t start playing.', 3000); return; }
 
         if (pm.getCurrentSound().id !== id) {
-          // Not on screen in SoundCloud's list: find it in the queue and jump there.
-          const find = () => pm.getQueue().models.find(m => m.sound && m.sound.id === id);
           if (!find()) await pullAll(() => !live() || find());
           if (!live()) return;
-          const item = find();
-          if (item) pm.setCurrentItem(item);
+          if (!find()) { pm.pauseCurrent(); say('SoundCloud can’t play that track.', 3000); return; }
+          pm.setCurrentItem(find());
         }
       }
       if (!pm.isPlaying()) pm.playCurrent();
